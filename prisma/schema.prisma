@@ -7,9 +7,177 @@ generator client {
 	provider = "prisma-client-js"
 }
 
+enum Direction {
+  INCOME
+  EXPENSE
+}
+
+enum Flow {
+  INCOME
+  EXPENSE
+  BOTH
+}
+
+enum AssetClass {
+  STOCK
+  ETF
+  MUTUAL_FUND
+  BOND
+  CRYPTO
+  CASH
+  REAL_ESTATE
+  COMMODITY
+  OTHER
+}
+
+enum ValuationMethod {
+  FIFO
+  LIFO
+  AVG
+}
+
 model User {
-	id        Int      @id @default(autoincrement())
-	email     String   @unique
-	name      String?
-	createdAt DateTime @default(now())
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relations
+  categories   Category[]
+  types        Type[]
+  transactions Transaction[]
+  assets       Asset[]
+  holdings     Holding[]
+}
+model Category {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Human label (e.g., "Salary", "Rent", "Groceries", "Dividends", "Broker Deposit")
+  name      String
+
+  /// Whether this category is for INCOME or EXPENSE flows
+  direction Direction
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // Relations
+  transactions Transaction[]
+
+  @@unique([userId, name, direction])
+  @@index([userId, direction, name])
+}
+
+model Type {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Optional secondary classification (e.g., "Fixed", "Variable", "Recurring", "One-off")
+  name      String
+
+  /// Whether this type applies to income, expense, or both
+  appliesTo Flow      @default(BOTH)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Relations
+  transactions Transaction[]
+
+  @@unique([userId, name])
+  @@index([userId, appliesTo])
+}
+
+model Asset {
+  id         String      @id @default(cuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Optional trading symbol/ticker (e.g., AAPL, BTC, VWCE)
+  symbol     String?
+
+  /// Display name (e.g., "Apple Inc.", "Bitcoin", "Vanguard FTSE All-World UCITS")
+  name       String
+
+  assetClass AssetClass
+
+  /// ISO 4217 currency code of pricing (e.g., "EUR", "USD")
+  currency   String      @default("EUR")
+
+  metadata   Json?
+
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  // Relations
+  holdings      Holding[]
+  transactions  Transaction[]
+
+  @@unique([userId, symbol, assetClass])
+  @@index([userId, assetClass])
+}
+
+model Holding {
+  id         String          @id @default(cuid())
+  userId     String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  assetId    String
+  asset      Asset           @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  /// Current position size (sum of lots if you later model them)
+  quantity   Decimal         @db.Decimal(38, 18)
+
+  /// Average cost per unit (in Asset.currency)
+  avgCost    Decimal         @db.Decimal(19, 6)
+
+  valuation  ValuationMethod @default(FIFO)
+
+  openedAt   DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@unique([userId, assetId])
+  @@index([userId])
+}
+
+model Transaction {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  categoryId  String
+  category    Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  typeId      String?
+  type        Type?      @relation(fields: [typeId], references: [id], onDelete: SetNull)
+
+  /// Positive numbers; use `direction` to know if it's an inflow or outflow
+  amount      Decimal    @db.Decimal(19, 4)
+
+  /// Denormalized for fast filtering; should match `category.direction`
+  direction   Direction
+
+  occurredAt  DateTime   @default(now())
+  description String?
+
+  // --- OPTIONAL: link transactions to assets for trades/dividends ---
+  assetId     String?    // Set for trades or dividends/interest tied to an asset
+  asset       Asset?     @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  /// Use when `assetId` is set (e.g., trades). For dividends, leave null.
+  units       Decimal?   @db.Decimal(38, 18) // quantity bought/sold
+  unitPrice   Decimal?   @db.Decimal(19, 6)  // price per unit in Asset.currency
+  fees        Decimal?   @db.Decimal(19, 6)  // commissions, taxes, etc.
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([userId, occurredAt])
+  @@index([userId, direction, occurredAt])
+  @@index([userId, categoryId, occurredAt])
+  @@index([userId, assetId, occurredAt])
 }

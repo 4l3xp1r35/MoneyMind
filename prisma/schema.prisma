@@ -36,6 +36,17 @@ enum ValuationMethod {
   AVG
 }
 
+enum Recurrence {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum TradeDirection {
+  BUY
+  SELL
+}
+
 model User {
   id           String        @id @default(cuid())
   email        String        @unique
@@ -50,9 +61,13 @@ model User {
   types        Type[]
   transactions Transaction[]
   assets       Asset[]
-  holdings     Holding[] 
-  accounts Account[]
-  sessions Session[]
+  holdings     Holding[]
+  trades       Trade[]
+  budgets      Budget[]
+  goals        Goal[]
+  platforms    Platform[]
+  accounts     Account[]
+  sessions     Session[]
 
   @@map("users")
 }
@@ -112,6 +127,7 @@ model Category {
 
   // Relations
   transactions Transaction[]
+  budgets      Budget[]
 
   @@unique([userId, name, direction])
   @@index([userId, direction, name])
@@ -161,6 +177,7 @@ model Asset {
 
   // Relations
   holdings      Holding[]
+  trades        Trade[]
   transactions  Transaction[]
 
   @@unique([userId, symbol, assetClass])
@@ -181,12 +198,21 @@ model Holding {
   /// Average cost per unit (in Asset.currency)
   avgCost    Decimal         @db.Decimal(19, 6)
 
+  /// Where this position is held, e.g. "bybit", "mexc", "trading212", "ibkr", "other"
+  platform    String          @default("other")
+
+  /// Optional override ticker for price lookup (e.g. "USOIL_USDT" for OIL(WTI)USDT on MEXC futures)
+  priceSymbol String?
+
+  /// Leverage factor: null = 1x (no leverage), 2 = 2×, 3 = 3×, -1 = inverse, -2 = −2×, etc.
+  leverage   Int?
+
   valuation  ValuationMethod @default(FIFO)
 
   openedAt   DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
 
-  @@unique([userId, assetId])
+  @@unique([userId, assetId, platform])
   @@index([userId])
 }
 
@@ -215,9 +241,18 @@ model Transaction {
   asset       Asset?     @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
   /// Use when `assetId` is set (e.g., trades). For dividends, leave null.
-  units       Decimal?   @db.Decimal(38, 18) // quantity bought/sold
-  unitPrice   Decimal?   @db.Decimal(19, 6)  // price per unit in Asset.currency
-  fees        Decimal?   @db.Decimal(19, 6)  // commissions, taxes, etc.
+  units       Decimal?    @db.Decimal(38, 18) // quantity bought/sold
+  unitPrice   Decimal?    @db.Decimal(19, 6)  // price per unit in Asset.currency
+  fees        Decimal?    @db.Decimal(19, 6)  // commissions, taxes, etc.
+
+  /// Recurring transaction settings
+  recurrence      Recurrence? // null = one-off
+  nextOccurrence  DateTime?   // when to spawn the next copy
+
+  /// If generated from a recurring source, points back to the template
+  parentId    String?
+  parent      Transaction?  @relation("RecurringChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Transaction[] @relation("RecurringChildren")
 
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -226,4 +261,106 @@ model Transaction {
   @@index([userId, direction, occurredAt])
   @@index([userId, categoryId, occurredAt])
   @@index([userId, assetId, occurredAt])
+  @@index([userId, recurrence, nextOccurrence])
+}
+
+model Platform {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// "bybit" | "mexc" | "trading212" | "ibkr"
+  name      String
+
+  /// User-defined label e.g. "Bybit Main", "T212 ISA"
+  label     String
+
+  /// AES-256-GCM encrypted API key
+  apiKey    String
+
+  /// AES-256-GCM encrypted API secret (null for platforms that don't need one)
+  apiSecret String?
+
+  /// Extra config: e.g. { "mode": "live" } for Trading 212
+  extra     Json?
+
+  isEnabled Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("platforms")
+}
+
+model Budget {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  /// Monthly spending limit
+  amount     Decimal  @db.Decimal(19, 4)
+
+  /// "YYYY-MM" — e.g. "2025-03"
+  month      String
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, categoryId, month])
+  @@index([userId, month])
+}
+model Goal {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name         String
+  emoji        String    @default("🎯")
+  targetAmount Decimal   @db.Decimal(19, 4)
+  savedAmount  Decimal   @db.Decimal(19, 4) @default(0)
+  deadline     DateTime?
+  color        String    @default("#6366f1")
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("goals")
+}
+
+model Trade {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  assetId   String
+  asset     Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  direction TradeDirection
+
+  /// Number of units bought or sold (always positive)
+  quantity  Decimal        @db.Decimal(38, 18)
+
+  /// Price per unit at execution (in asset currency)
+  price     Decimal        @db.Decimal(19, 6)
+
+  /// Commission / fees
+  fees      Decimal        @db.Decimal(19, 6) @default(0)
+
+  /// Platform/broker where the trade was executed
+  platform  String         @default("other")
+
+  tradedAt  DateTime       @default(now())
+  notes     String?
+
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([userId, assetId, tradedAt])
+  @@index([userId, tradedAt])
+  @@map("trades")
 }

@@ -1,12 +1,15 @@
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthOptions } from "next-auth";
 import Github from "next-auth/providers/github";
 import Credentials from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@auth/prisma-adapter";
+import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import { compare } from "bcrypt";
 
-export const authOptions = {
+export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
+  session: {
+    strategy: "jwt" as const,
+  },
   providers: [
     Github({
       clientId: process.env.GITHUB_ID!,
@@ -28,6 +31,7 @@ export const authOptions = {
           where: { email: credentials.email },
         });
 
+
         if (!user || !user.passwordHash) {
           throw new Error("No password set for this user");
         }
@@ -42,20 +46,27 @@ export const authOptions = {
     }),
   ],
   callbacks: {
-    async session({ session, user }) {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+      }
+      return token;
+    },
+    async session({ session, token }) {
       if (session.user) {
-        session.user.id = user.id;
+        session.user.id = token.id as string;
       }
       return session;
     },
   },
-  trustHost: true,
+  pages: {
+    signIn: "/login",
+  },
 };
 
 
-const { handlers } = NextAuth(authOptions);
+const handler = NextAuth(authOptions);
 
-export const GET = handlers.GET;
-export const POST = handlers.POST;
+export { handler as GET, handler as POST };
 
 export const dynamic = "force-dynamic";

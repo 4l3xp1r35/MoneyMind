@@ -1,5 +1,26 @@
-version: '3.8'
 services:
+  # ── Next.js app ────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moneymind-web
+    restart: always
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PRICES_SERVICE_URL=http://prices:3001
+      - NODE_ENV=production
+    ports:
+      - '3000:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+      prices:
+        condition: service_started
+
+  # ── Database ──────────────────────────────────────────────────────────────
   db:
     image: postgres:17
     container_name: postgres17
@@ -10,5 +31,63 @@ services:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Cache ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: moneymind-redis
+    restart: always
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Prices microservice ────────────────────────────────────────────────────
+  # Fetches real-time prices from CoinGecko, Yahoo Finance and MEXC.
+  # Caches results in Redis for 60 s to avoid rate-limit hits.
+  prices:
+    build:
+      context: .
+      dockerfile: services/prices/Dockerfile
+    container_name: moneymind-prices
+    restart: always
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PORT=3001
+    ports:
+      - '3001:3001'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Worker microservice ────────────────────────────────────────────────────
+  # Background job runner (node-cron):
+  #   - every minute: generate due recurring transactions for all users
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    container_name: moneymind-worker
+    restart: always
+    env_file:
+      - path: .env.local   # needs DATABASE_URL
+        required: false
+      - path: .env
+        required: false
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   postgres_data:
+  redis_data:

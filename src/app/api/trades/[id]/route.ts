@@ -16,11 +16,20 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { direction, quantity, price, fees, platform, tradedAt, notes } = body;
+    const { assetId, direction, quantity, price, fees, platform, tradedAt, notes } = body;
 
     const trade = await prisma.trade.findUnique({ where: { id } });
     if (!trade || trade.userId !== session.user.id)
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    // If asset is being changed, verify the new asset belongs to this user
+    if (assetId && assetId !== trade.assetId) {
+      const asset = await prisma.asset.findFirst({
+        where: { id: assetId, userId: session.user.id },
+      });
+      if (!asset)
+        return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+    }
 
     const platformKey = platform
       ? (platform as string).toLowerCase().replace(/\s+/g, "-")
@@ -29,6 +38,7 @@ export async function PUT(
     const updated = await prisma.trade.update({
       where: { id },
       data: {
+        ...(assetId   && assetId !== trade.assetId && { assetId }),
         ...(direction && { direction: (direction as string).toUpperCase() as TradeDirection }),
         ...(quantity  != null && { quantity }),
         ...(price     != null && { price }),
@@ -40,10 +50,13 @@ export async function PUT(
       include: { asset: true },
     });
 
-    // Sync both old and new platform holdings
+    // Sync holdings: always re-sync old asset, and new asset if it changed
     await syncHolding(prisma, session.user.id, trade.assetId, trade.platform);
     if (platformKey !== trade.platform) {
       await syncHolding(prisma, session.user.id, trade.assetId, platformKey);
+    }
+    if (assetId && assetId !== trade.assetId) {
+      await syncHolding(prisma, session.user.id, assetId, platformKey);
     }
 
     return NextResponse.json({

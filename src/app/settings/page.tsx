@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+export const dynamic = "force-dynamic";
+
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 interface ConnectedPlatform {
@@ -165,7 +167,7 @@ function AddRow({ onAdd, placeholder }: { onAdd: (name: string) => Promise<strin
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
-export default function SettingsPage() {
+function SettingsContent() {
   const searchParams = useSearchParams();
   const [categories, setCategories] = useState<Category[]>([]);
   const [types, setTypes] = useState<TxType[]>([]);
@@ -521,5 +523,13 @@ export default function SettingsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense>
+      <SettingsContent />
+    </Suspense>
   );
 }

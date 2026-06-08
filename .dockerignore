@@ -1,0 +1,7 @@
+.next
+node_modules
+.git
+.env.local
+*.md
+.claude
+services/*/node_modules

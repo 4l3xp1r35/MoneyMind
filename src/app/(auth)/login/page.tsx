@@ -18,17 +18,42 @@ function LoginForm() {
   // Already logged in → go where they came from (or dashboard)
   useEffect(() => {
     if (status === "authenticated") {
-      const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
+      const raw = searchParams.get("callbackUrl") ?? "/dashboard";
+      // Prevent redirect loops: only allow relative paths that aren't the login page
+      let callbackUrl = "/dashboard";
+      try {
+        const parsed = new URL(raw, window.location.origin);
+        if (parsed.origin === window.location.origin && !parsed.pathname.startsWith("/login") && !parsed.pathname.startsWith("/api/auth")) {
+          callbackUrl = parsed.pathname + parsed.search;
+        }
+      } catch {
+        if (raw.startsWith("/") && !raw.startsWith("/login") && !raw.startsWith("/api/auth")) {
+          callbackUrl = raw;
+        }
+      }
       router.replace(callbackUrl);
     }
   }, [status, router, searchParams]);
+
+  function getSafeCallbackUrl() {
+    const raw = searchParams.get("callbackUrl") ?? "/dashboard";
+    try {
+      const parsed = new URL(raw, window.location.origin);
+      if (parsed.origin === window.location.origin && !parsed.pathname.startsWith("/login") && !parsed.pathname.startsWith("/api/auth")) {
+        return parsed.pathname + parsed.search;
+      }
+    } catch {
+      if (raw.startsWith("/") && !raw.startsWith("/login") && !raw.startsWith("/api/auth")) {
+        return raw;
+      }
+    }
+    return "/dashboard";
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
-
-    const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
 
     const res = await signIn("credentials", {
       email: form.email,
@@ -40,14 +65,13 @@ function LoginForm() {
       setError("Invalid email or password.");
       setLoading(false);
     } else {
-      router.replace(callbackUrl);
+      router.replace(getSafeCallbackUrl());
     }
   }
 
   async function handleGitHub() {
     setLoading(true);
-    const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
-    await signIn("github", { callbackUrl });
+    await signIn("github", { callbackUrl: getSafeCallbackUrl() });
   }
 
   if (status === "loading" || status === "authenticated") {

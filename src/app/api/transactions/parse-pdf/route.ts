@@ -2,34 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
-// Date patterns: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD-MM-YYYY, DD.MM.YYYY
-const DATE_RE = /\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\b/;
+// DD-MM-YYYY (10 chars exactly)
+const DATE10_RE = /^(\d{2})-(\d{2})-(\d{4})/;
 
-// Amount: optional sign, digits, optional decimal
-const AMOUNT_RE = /([+-]?\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/;
-
-function parseFlexDate(s: string): string | null {
-  // YYYY-MM-DD or YYYY/MM/DD
-  if (/^\d{4}[-\/]\d{1,2}[-\/]\d{1,2}$/.test(s)) {
-    const d = new Date(s);
-    if (!isNaN(d.getTime())) return d.toISOString();
-  }
-  // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
-  const m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
-  if (m) {
-    const year = m[3].length === 2 ? `20${m[3]}` : m[3];
-    const d = new Date(Number(year), Number(m[2]) - 1, Number(m[1]));
-    if (!isNaN(d.getTime())) return d.toISOString();
-  }
-  return null;
+function parseDate10(s: string): string | null {
+  const m = s.match(DATE10_RE);
+  if (!m) return null;
+  const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
 }
 
-function parseAmount(s: string): number {
-  // Remove spaces, currency symbols; normalise decimal separator
-  const clean = s.replace(/\s/g, "").replace(/[€$£]/g, "");
-  // If last separator is comma with 2 digits → decimal comma
-  const normalised = clean.replace(/\.(\d{3})/g, "$1").replace(",", ".");
-  return Math.abs(parseFloat(normalised) || 0);
+// Parse a Portuguese amount string like "-35,63" or "1.065,84" → number
+function parsePortugueseAmount(s: string): number {
+  // Remove thousand separators (period), replace decimal comma with dot
+  const clean = s.replace(/\./g, "").replace(",", ".");
+  return parseFloat(clean);
 }
 
 interface ParsedRow {
@@ -40,36 +28,55 @@ interface ParsedRow {
 
 function extractRows(text: string): ParsedRow[] {
   const rows: ParsedRow[] = [];
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  // Collapse multi-line entries: join lines that don't start with a date onto the previous line
+  const rawLines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines: string[] = [];
+  for (const line of rawLines) {
+    if (DATE10_RE.test(line) || lines.length === 0) {
+      lines.push(line);
+    } else {
+      // continuation of previous line
+      lines[lines.length - 1] += " " + line;
+    }
+  }
+
+  // Amount pattern: optional sign, digits with optional thousands separator, comma + 2 decimals
+  const AMOUNT_RE = /(-?\d{1,3}(?:\.\d{3})*,\d{2})/g;
 
   for (const line of lines) {
-    const dateMatch   = line.match(DATE_RE);
-    const amountMatch = line.match(new RegExp(AMOUNT_RE.source, "g"));
-    if (!dateMatch || !amountMatch) continue;
+    // Must start with DD-MM-YYYY
+    if (!DATE10_RE.test(line)) continue;
 
-    const isoDate = parseFlexDate(dateMatch[1]);
+    const isoDate = parseDate10(line);
     if (!isoDate) continue;
 
-    // If there are 2+ amounts on the line, the last is usually the running balance
-    // (saldo contabilístico) and the second-to-last is the transaction amount (montante).
-    // If there is only one amount, use it directly.
-    const montanteMatch = amountMatch.length >= 2
-      ? amountMatch[amountMatch.length - 2]
-      : amountMatch[0];
-    const amount = parseAmount(montanteMatch);
-    if (amount <= 0) continue;
+    // Skip the first date (mov date) and possibly second date (value date, also 10 chars + separator)
+    let rest = line.slice(10); // skip first date
+    if (DATE10_RE.test(rest)) rest = rest.slice(10); // skip second date if present
 
-    // Description = everything between the date and the montante, cleaned up
-    const afterDate = line.slice(dateMatch.index! + dateMatch[0].length);
-    const montanteIdx = afterDate.indexOf(montanteMatch);
-    const rawDesc = (montanteIdx > 0 ? afterDate.slice(0, montanteIdx) : afterDate)
-      .replace(/\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b/g, "")  // strip any extra dates
-      .replace(/\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b/g, "")
+    // Find all amounts on the line
+    const amounts = [...rest.matchAll(AMOUNT_RE)].map((m) => m[1]);
+    if (amounts.length < 2) continue; // need at least amount + balance
+
+    // Second-to-last = transaction amount, last = running balance
+    const amountStr = amounts[amounts.length - 2];
+    const amount = parsePortugueseAmount(amountStr);
+    if (isNaN(amount) || amount === 0) continue;
+
+    // Description = everything between dates and the first amount
+    const firstAmountIdx = rest.indexOf(amounts[0]);
+    const rawDesc = rest
+      .slice(0, firstAmountIdx)
       .replace(/[|·•\t]+/g, " ")
       .replace(/\s{2,}/g, " ")
       .trim();
 
-    rows.push({ date: isoDate, amount, description: rawDesc.slice(0, 300) });
+    rows.push({
+      date: isoDate,
+      amount: Math.abs(amount),
+      description: rawDesc.slice(0, 300),
+    });
   }
 
   return rows;

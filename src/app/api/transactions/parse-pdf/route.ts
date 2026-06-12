@@ -102,7 +102,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ rows, pageCount: info.total });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     console.error("PDF parse error:", err);
-    return NextResponse.json({ error: "Failed to parse PDF" }, { status: 500 });
+    return NextResponse.json({ error: `Failed to parse PDF: ${msg}` }, { status: 500 });
   }
 }

@@ -123,7 +123,7 @@ export default function ImportPage() {
         setPdfMeta({ pages: data.pageCount, detected: rows.length });
         setReviewRows(rows);
         setStep(2); // PDF → configure step
-      } catch { setFileError("Failed to upload or parse the PDF."); }
+      } catch (e) { setFileError(`Failed to upload or parse the PDF: ${e instanceof Error ? e.message : String(e)}`); }
       finally  { setPdfLoading(false); }
     } else {
       Papa.parse(file, {

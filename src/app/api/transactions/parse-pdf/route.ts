@@ -85,13 +85,10 @@ export async function POST(request: NextRequest) {
     if (!file) return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const { PDFParse } = await import("pdf-parse");
-    const parser = new PDFParse({ data: new Uint8Array(buffer) });
-    const result = await parser.getText();
-    const info   = await parser.getInfo();
-    await parser.destroy();
+    const pdfParse = (await import("pdf-parse")).default;
+    const data = await pdfParse(buffer);
 
-    const rows = extractRows(result.text);
+    const rows = extractRows(data.text);
 
     if (rows.length === 0) {
       return NextResponse.json(
@@ -100,7 +97,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ rows, pageCount: info.total });
+    return NextResponse.json({ rows, pageCount: data.numpages });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("PDF parse error:", err);

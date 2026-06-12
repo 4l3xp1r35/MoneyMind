@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import pdfParse from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 
 // Date patterns: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD-MM-YYYY, DD.MM.YYYY
 const DATE_RE = /\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\b/;
@@ -86,9 +86,12 @@ export async function POST(request: NextRequest) {
     if (!file) return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const data   = await pdfParse(buffer);
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    const result = await parser.getText();
+    const info   = await parser.getInfo();
+    await parser.destroy();
 
-    const rows = extractRows(data.text);
+    const rows = extractRows(result.text);
 
     if (rows.length === 0) {
       return NextResponse.json(
@@ -97,7 +100,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ rows, pageCount: data.numpages });
+    return NextResponse.json({ rows, pageCount: info.total });
   } catch (err) {
     console.error("PDF parse error:", err);
     return NextResponse.json({ error: "Failed to parse PDF" }, { status: 500 });

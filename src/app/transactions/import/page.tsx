@@ -72,6 +72,7 @@ export default function ImportPage() {
   // review (step 3)
   const [reviewRows, setReviewRows] = useState<ReviewRow[]>([]);
   const [search,     setSearch]     = useState("");
+  const [filterCat,  setFilterCat]  = useState<"all" | "none" | string>("all");
 
   // new-category inline form
   const [showNewCat,    setShowNewCat]    = useState(false);
@@ -187,15 +188,18 @@ export default function ImportPage() {
   const remainingRows = reviewRows.filter((r) => !r.imported);
 
   const searchLower = search.toLowerCase().trim();
-  const visibleRows = !searchLower
-    ? reviewRows.map((r, i) => ({ ...r, originalIndex: i }))
-    : reviewRows
-        .map((r, i) => ({ ...r, originalIndex: i }))
-        .filter((r) =>
-          r.description.toLowerCase().includes(searchLower) ||
-          r.date.includes(searchLower) ||
-          r.amount.includes(searchLower)
-        );
+  const visibleRows = reviewRows
+    .map((r, i) => ({ ...r, originalIndex: i }))
+    .filter((r) => {
+      if (searchLower && !(
+        r.description.toLowerCase().includes(searchLower) ||
+        r.date.includes(searchLower) ||
+        r.amount.includes(searchLower)
+      )) return false;
+      if (filterCat === "none" && r.categoryId) return false;
+      if (filterCat !== "all" && filterCat !== "none" && r.categoryId !== filterCat) return false;
+      return true;
+    });
 
   // ── import ────────────────────────────────────────────────────────────────
 
@@ -259,7 +263,7 @@ export default function ImportPage() {
 
   function reset() {
     setStep(1); setIsPdf(false); setPdfMeta(null); setFileError(null);
-    setCsvRaw([]); setColumns([]); setReviewRows([]); setSearch("");
+    setCsvRaw([]); setColumns([]); setReviewRows([]); setSearch(""); setFilterCat("all");
     setLastBatch(null); setTotalImported(0); setDone(false);
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -615,23 +619,36 @@ export default function ImportPage() {
             </div>
           </div>
 
-          {/* Search bar */}
-          <div className="relative">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by description, date (YYYY-MM-DD) or amount…"
-              className="w-full pl-9 pr-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-            {search && (
-              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
-            )}
+          {/* Search bar + category filter */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by description, date (YYYY-MM-DD) or amount…"
+                className="w-full pl-9 pr-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              {search && (
+                <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              )}
+            </div>
+            <select
+              value={filterCat}
+              onChange={(e) => setFilterCat(e.target.value)}
+              className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="all">All categories</option>
+              <option value="none">No category</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
           </div>
 
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">

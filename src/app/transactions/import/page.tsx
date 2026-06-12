@@ -101,13 +101,17 @@ export default function ImportPage() {
     setIsPdf(isPdfFile);
 
     if (isPdfFile) {
+      if (file.size > 4 * 1024 * 1024) {
+        setFileError("PDF is too large (max 4 MB on free plan). Try splitting it into smaller files.");
+        return;
+      }
       setPdfLoading(true);
       try {
         const form = new FormData();
         form.append("file", file);
         const res  = await fetch("/api/transactions/parse-pdf", { method: "POST", body: form });
         const data = await res.json();
-        if (!res.ok) { setFileError(data.error ?? "Failed to parse PDF"); return; }
+        if (!res.ok) { setFileError(`Failed to parse PDF (${res.status}): ${data.error ?? "Unknown error"}`); return; }
         const rows: ReviewRow[] = (data.rows as { date: string; amount: number; description: string }[]).map((r) => ({
           date:        isoToInputDate(r.date),
           amount:      r.amount.toFixed(2),

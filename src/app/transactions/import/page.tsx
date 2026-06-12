@@ -175,8 +175,12 @@ export default function ImportPage() {
   }
 
   function toggleAll(val: boolean) {
-    // never re-select already-imported rows
-    setReviewRows((rows) => rows.map((r) => r.imported ? r : { ...r, selected: val }));
+    const visibleIndices = new Set(visibleRows.map((r) => r.originalIndex));
+    setReviewRows((rows) =>
+      rows.map((r, i) =>
+        r.imported ? r : visibleIndices.has(i) ? { ...r, selected: val } : r
+      )
+    );
   }
 
   const selectedRows  = reviewRows.filter((r) => r.selected && !r.imported);
